@@ -23,29 +23,44 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
 
   // Initialize speech recognition once
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    
-    if (SpeechRecognition && window.location.protocol === 'https:') {
-      // Request microphone permission on component mount
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({ audio: true })
-          .then(() => {
-            setSpeechSupported(true);
-          })
-          .catch((error) => {
-            console.warn('Microphone permission denied:', error);
-            setSpeechSupported(false);
-          });
+    const checkSpeechSupport = async () => {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      
+      if (!SpeechRecognition) {
+        console.log('SpeechRecognition not available');
+        setSpeechSupported(false);
+        return;
       }
-    } else {
-      setSpeechSupported(false);
-    }
+
+      if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+        console.log('HTTPS required for speech recognition');
+        setSpeechSupported(false);
+        return;
+      }
+
+      // Check if we have microphone permissions
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // Stop the stream immediately - we just needed to check permission
+          stream.getTracks().forEach(track => track.stop());
+          setSpeechSupported(true);
+        } else {
+          setSpeechSupported(false);
+        }
+      } catch (error) {
+        console.warn('Microphone permission check failed:', error);
+        setSpeechSupported(false);
+      }
+    };
+
+    checkSpeechSupport();
   }, []);
 
   const handleVoiceInput = async (type) => {
-    // Check HTTPS requirement
-    if (window.location.protocol !== 'https:') {
-      alert('Speech recognition requires HTTPS. Please use a secure connection.');
+    // Additional checks
+    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+      alert('Speech recognition requires HTTPS or localhost.');
       return;
     }
 
@@ -54,6 +69,7 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       return;
     }
 
+    // If currently listening, stop
     if (isListening) {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
@@ -62,88 +78,115 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       return;
     }
 
+    // Check if browser is online
+    if (!navigator.onLine) {
+      alert('Speech recognition requires an internet connection.');
+      return;
+    }
+
     try {
-      // Create new recognition instance for each use
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      
+      // Clean up any existing recognition
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
+
       recognitionRef.current = new SpeechRecognition();
       
-      // Configure recognition
+      // Configure recognition with more reliable settings
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
       recognitionRef.current.lang = 'en-US';
       recognitionRef.current.maxAlternatives = 1;
-
-      // Request microphone permission before starting
-      await navigator.mediaDevices.getUserMedia({ audio: true });
       
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        if (recognitionRef.current && isListening) {
+          recognitionRef.current.stop();
+          setIsListening(false);
+          alert('Speech recognition timed out. Please try again.');
+        }
+      }, 30000); // 30 second timeout
+
       setIsListening(true);
 
       recognitionRef.current.onstart = () => {
-        console.log('Speech recognition started');
+        console.log('Speech recognition started successfully');
       };
 
       recognitionRef.current.onresult = (event) => {
+        clearTimeout(timeout);
         try {
-          const transcript = event.results[0][0].transcript.trim();
-          console.log('Speech result:', transcript);
-          
-          if (transcript) {
-            if (type === 'ingredient') {
-              // Split by common separators and clean up
-              const ingredients = transcript
-                .split(/[,;]/)
-                .map(item => item.trim())
-                .filter(item => item.length > 0);
-              
-              setValues(v => ({ 
-                ...v, 
-                ingredients: [...v.ingredients, ...ingredients] 
-              }));
-            } else if (type === 'tag') {
-              // Split by common separators for tags
-              const tags = transcript
-                .split(/[,;]/)
-                .map(item => item.trim())
-                .filter(item => item.length > 0);
-              
-              setValues(v => ({ 
-                ...v, 
-                tags: [...v.tags, ...tags] 
-              }));
+          if (event.results && event.results[0] && event.results[0][0]) {
+            const transcript = event.results[0][0].transcript.trim();
+            console.log('Speech result:', transcript);
+            
+            if (transcript) {
+              if (type === 'ingredient') {
+                const ingredients = transcript
+                  .split(/[,;]/)
+                  .map(item => item.trim())
+                  .filter(item => item.length > 0);
+                
+                setValues(v => ({ 
+                  ...v, 
+                  ingredients: [...v.ingredients, ...ingredients] 
+                }));
+              } else if (type === 'tag') {
+                const tags = transcript
+                  .split(/[,;]/)
+                  .map(item => item.trim())
+                  .filter(item => item.length > 0);
+                
+                setValues(v => ({ 
+                  ...v, 
+                  tags: [...v.tags, ...tags] 
+                }));
+              }
             }
           }
         } catch (error) {
           console.error('Error processing speech result:', error);
+          alert('Error processing speech. Please try again.');
         }
         setIsListening(false);
       };
 
       recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
+        clearTimeout(timeout);
+        console.error('Speech recognition error:', event.error, event);
         setIsListening(false);
         
         let errorMessage = '';
         switch(event.error) {
           case 'network':
-            errorMessage = 'Network error. Please check your connection and try again.';
+            errorMessage = 'Network error occurred. Check your internet connection and try again. Make sure you\'re not using a VPN or proxy that might block speech services.';
             break;
           case 'not-allowed':
-            errorMessage = 'Microphone access denied. Please allow microphone permissions.';
+            errorMessage = 'Microphone access denied. Please allow microphone permissions and refresh the page.';
             break;
           case 'no-speech':
             errorMessage = 'No speech detected. Please speak clearly and try again.';
             break;
           case 'audio-capture':
-            errorMessage = 'No microphone detected. Please connect a microphone.';
+            errorMessage = 'No microphone detected. Please connect a microphone and refresh the page.';
             break;
           case 'service-not-allowed':
-            errorMessage = 'Speech service blocked. Ensure you\'re using HTTPS.';
+            errorMessage = 'Speech service blocked. Ensure you\'re using HTTPS and try refreshing the page.';
+            break;
+          case 'bad-grammar':
+            errorMessage = 'Speech recognition service error. Please try again.';
+            break;
+          case 'language-not-supported':
+            errorMessage = 'Language not supported by speech recognition service.';
             break;
           case 'aborted':
             // Don't show error for user-initiated stops
             return;
           default:
-            errorMessage = `Speech recognition failed: ${event.error}. Please try again.`;
+            errorMessage = `Speech recognition failed (${event.error}). Please try again or check your internet connection.`;
         }
         
         if (errorMessage) {
@@ -152,23 +195,36 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       };
 
       recognitionRef.current.onend = () => {
+        clearTimeout(timeout);
         console.log('Speech recognition ended');
         setIsListening(false);
       };
 
-      // Start recognition with a small delay to ensure proper setup
-      setTimeout(() => {
-        if (recognitionRef.current) {
-          recognitionRef.current.start();
-        }
-      }, 100);
+      // Start recognition with error handling
+      try {
+        recognitionRef.current.start();
+      } catch (error) {
+        clearTimeout(timeout);
+        console.error('Failed to start speech recognition:', error);
+        setIsListening(false);
+        alert('Failed to start speech recognition. Please try again.');
+      }
 
     } catch (error) {
-      console.error('Microphone access error:', error);
+      console.error('Speech recognition setup error:', error);
       setIsListening(false);
-      alert('Unable to access microphone. Please check permissions and try again.');
+      alert('Unable to initialize speech recognition. Please check your browser settings.');
     }
   };
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -269,6 +325,7 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             color={isListening ? "secondary" : "primary"}
             onClick={() => handleVoiceInput('ingredient')}
             disabled={!speechSupported}
+            title={speechSupported ? "Click to use voice input" : "Speech recognition not available"}
           >
             {isListening ? '⏹️' : '🎤'}
           </Button>
@@ -306,6 +363,7 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             color={isListening ? "secondary" : "primary"}
             onClick={() => handleVoiceInput('tag')}
             disabled={!speechSupported}
+            title={speechSupported ? "Click to use voice input" : "Speech recognition not available"}
           >
             {isListening ? '⏹️' : '🎤'}
           </Button>
@@ -345,7 +403,7 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
 
         {!speechSupported && (
           <Typography variant="body2" color="warning" sx={{ mt: 1 }}>
-            Speech recognition not available. Please ensure you're using HTTPS and have microphone permissions.
+            Speech recognition not available. Please ensure you're using HTTPS (or localhost), have microphone permissions, and a stable internet connection.
           </Typography>
         )}
       </DialogContent>
