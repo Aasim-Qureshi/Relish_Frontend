@@ -1,43 +1,13 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, Chip, Stack, Typography
 } from '@mui/material';
 
 export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) {
-
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const recognition = SpeechRecognition ? new SpeechRecognition() : null;
-  if (recognition) {
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-  }
-
-  const handleVoiceInput = (type) => {
-    if (!recognition) {
-      alert('Speech recognition not supported in this browser.');
-      return;
-    }
-
-    recognition.start();
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript.trim();
-      const words = transcript.split(/\s+/);
-      if (type === 'ingredient') {
-        setValues(v => ({ ...v, ingredients: [...v.ingredients, ...words] }));
-      } else if (type === 'tag') {
-        setValues(v => ({ ...v, tags: [...v.tags, ...words] }));
-      }
-    };
-
-    recognition.onerror = (e) => {
-      console.error('Speech recognition error:', e.error);
-    };
-  };
-
-
+  const recognitionRef = useRef(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
 
   const [values, setValues] = useState({
     title: '',
@@ -50,6 +20,127 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
   const [tagInput, setTagInput] = useState('');
   const [ingredientInput, setIngredientInput] = useState('');
   const [imageError, setImageError] = useState('');
+
+  // Initialize speech recognition once
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'en-US';
+      
+      // Request microphone permission on component mount
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then(() => {
+            setSpeechSupported(true);
+          })
+          .catch((error) => {
+            console.warn('Microphone permission denied:', error);
+            setSpeechSupported(false);
+          });
+      }
+    } else {
+      setSpeechSupported(false);
+    }
+  }, []);
+
+  const handleVoiceInput = async (type) => {
+    if (!recognitionRef.current || !speechSupported) {
+      alert('Speech recognition not supported or microphone permission denied.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      // Request microphone permission before starting
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      setIsListening(true);
+
+      recognitionRef.current.onstart = () => {
+        console.log('Speech recognition started');
+      };
+
+      recognitionRef.current.onresult = (event) => {
+        const transcript = event.results[0][0].transcript.trim();
+        console.log('Speech result:', transcript);
+        
+        if (transcript) {
+          if (type === 'ingredient') {
+            // Split by common separators and clean up
+            const ingredients = transcript
+              .split(/[,;]/)
+              .map(item => item.trim())
+              .filter(item => item.length > 0);
+            
+            setValues(v => ({ 
+              ...v, 
+              ingredients: [...v.ingredients, ...ingredients] 
+            }));
+          } else if (type === 'tag') {
+            // Split by common separators for tags
+            const tags = transcript
+              .split(/[,;]/)
+              .map(item => item.trim())
+              .filter(item => item.length > 0);
+            
+            setValues(v => ({ 
+              ...v, 
+              tags: [...v.tags, ...tags] 
+            }));
+          }
+        }
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+        
+        let errorMessage = 'Speech recognition failed. ';
+        switch(event.error) {
+          case 'network':
+            errorMessage += 'Please check your internet connection.';
+            break;
+          case 'not-allowed':
+            errorMessage += 'Microphone permission denied. Please allow microphone access.';
+            break;
+          case 'no-speech':
+            errorMessage += 'No speech detected. Please try again.';
+            break;
+          case 'audio-capture':
+            errorMessage += 'No microphone found. Please connect a microphone.';
+            break;
+          case 'service-not-allowed':
+            errorMessage += 'Speech service not allowed. Try using HTTPS.';
+            break;
+          default:
+            errorMessage += 'Please try again.';
+        }
+        alert(errorMessage);
+      };
+
+      recognitionRef.current.onend = () => {
+        console.log('Speech recognition ended');
+        setIsListening(false);
+      };
+
+      recognitionRef.current.start();
+
+    } catch (error) {
+      console.error('Microphone access error:', error);
+      setIsListening(false);
+      alert('Unable to access microphone. Please check permissions and try again.');
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -115,7 +206,7 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       if (k === 'tags' || k === 'ingredients') {
         val.forEach(item => formData.append(`${k}[]`, item));
       } else if (k === 'imageFile') {
-        formData.append('image', val); // 👈 rename to match backend multer key
+        formData.append('image', val);
       } else if (val !== null) {
         formData.append(k, val);
       }
@@ -145,8 +236,13 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             onChange={(e) => setIngredientInput(e.target.value)}
             onKeyDown={handleAddIngredient}
           />
-          <Button variant="outlined" onClick={() => handleVoiceInput('ingredient')}>
-            🎤
+          <Button 
+            variant={isListening ? "contained" : "outlined"}
+            color={isListening ? "secondary" : "primary"}
+            onClick={() => handleVoiceInput('ingredient')}
+            disabled={!speechSupported}
+          >
+            {isListening ? '⏹️' : '🎤'}
           </Button>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
@@ -177,8 +273,13 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={handleAddTag}
           />
-          <Button variant="outlined" onClick={() => handleVoiceInput('tag')}>
-            🎤
+          <Button 
+            variant={isListening ? "contained" : "outlined"}
+            color={isListening ? "secondary" : "primary"}
+            onClick={() => handleVoiceInput('tag')}
+            disabled={!speechSupported}
+          >
+            {isListening ? '⏹️' : '🎤'}
           </Button>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
@@ -213,8 +314,13 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             {imageError}
           </Typography>
         )}
-      </DialogContent>
 
+        {!speechSupported && (
+          <Typography variant="body2" color="warning" sx={{ mt: 1 }}>
+            Speech recognition not available. Please ensure you're using HTTPS and have microphone permissions.
+          </Typography>
+        )}
+      </DialogContent>
 
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
