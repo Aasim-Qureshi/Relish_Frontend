@@ -20,6 +20,7 @@
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.7.0",
+    "react-speech-recognition": "^4.0.1",
     "react-window": "^1.8.11",
     "yup": "^1.6.1"
   },
