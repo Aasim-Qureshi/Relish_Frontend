@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Button, Chip, Stack, Typography
+  TextField, Button, Chip, Stack, Typography, Alert
 } from '@mui/material';
 
 export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) {
   const recognitionRef = useRef(null);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastError, setLastError] = useState('');
 
   const [values, setValues] = useState({
     title: '',
@@ -21,36 +23,41 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
   const [ingredientInput, setIngredientInput] = useState('');
   const [imageError, setImageError] = useState('');
 
-  // Initialize speech recognition once
+  // Initialize speech recognition
   useEffect(() => {
     const checkSpeechSupport = async () => {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       
       if (!SpeechRecognition) {
-        console.log('SpeechRecognition not available');
         setSpeechSupported(false);
         return;
       }
 
-      if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-        console.log('HTTPS required for speech recognition');
+      // Check if we're on HTTPS or localhost
+      const isSecure = window.location.protocol === 'https:' || 
+                      window.location.hostname === 'localhost' ||
+                      window.location.hostname === '127.0.0.1';
+      
+      if (!isSecure) {
         setSpeechSupported(false);
+        setLastError('HTTPS required for speech recognition');
         return;
       }
 
-      // Check if we have microphone permissions
       try {
+        // Test microphone permissions
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          // Stop the stream immediately - we just needed to check permission
           stream.getTracks().forEach(track => track.stop());
           setSpeechSupported(true);
+          setLastError('');
         } else {
           setSpeechSupported(false);
+          setLastError('Microphone not available');
         }
       } catch (error) {
-        console.warn('Microphone permission check failed:', error);
         setSpeechSupported(false);
+        setLastError('Microphone permission denied');
       }
     };
 
@@ -58,14 +65,8 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
   }, []);
 
   const handleVoiceInput = async (type) => {
-    // Additional checks
-    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-      alert('Speech recognition requires HTTPS or localhost.');
-      return;
-    }
-
     if (!speechSupported) {
-      alert('Speech recognition not supported or microphone permission denied.');
+      alert('Speech recognition not available. ' + lastError);
       return;
     }
 
@@ -78,18 +79,28 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       return;
     }
 
-    // Check if browser is online
+    // Check network connectivity
     if (!navigator.onLine) {
-      alert('Speech recognition requires an internet connection.');
+      alert('No internet connection. Speech recognition requires internet access.');
       return;
     }
 
+    await startSpeechRecognition(type);
+  };
+
+  const startSpeechRecognition = async (type, attempt = 0) => {
+    const MAX_RETRIES = 2;
+    
     try {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       
       // Clean up any existing recognition
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
         recognitionRef.current = null;
       }
 
@@ -101,19 +112,19 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       recognitionRef.current.lang = 'en-US';
       recognitionRef.current.maxAlternatives = 1;
       
-      // Add timeout to prevent hanging
+      // Shorter timeout to fail faster and retry
       const timeout = setTimeout(() => {
         if (recognitionRef.current && isListening) {
           recognitionRef.current.stop();
           setIsListening(false);
-          alert('Speech recognition timed out. Please try again.');
         }
-      }, 30000); // 30 second timeout
+      }, 10000); // 10 second timeout
 
       setIsListening(true);
+      setRetryCount(attempt);
 
       recognitionRef.current.onstart = () => {
-        console.log('Speech recognition started successfully');
+        console.log('Speech recognition started, attempt:', attempt + 1);
       };
 
       recognitionRef.current.onresult = (event) => {
@@ -145,53 +156,68 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
                   tags: [...v.tags, ...tags] 
                 }));
               }
+              setLastError(''); // Clear any previous errors
             }
           }
         } catch (error) {
           console.error('Error processing speech result:', error);
-          alert('Error processing speech. Please try again.');
         }
         setIsListening(false);
+        setRetryCount(0);
       };
 
-      recognitionRef.current.onerror = (event) => {
+      recognitionRef.current.onerror = async (event) => {
         clearTimeout(timeout);
-        console.error('Speech recognition error:', event.error, event);
+        console.error('Speech recognition error:', event.error, 'attempt:', attempt + 1);
         setIsListening(false);
         
+        // Handle network errors with retry logic
+        if (event.error === 'network' && attempt < MAX_RETRIES) {
+          console.log('Network error, retrying in 1 second...');
+          setLastError(`Network error, retrying... (${attempt + 1}/${MAX_RETRIES + 1})`);
+          
+          setTimeout(() => {
+            startSpeechRecognition(type, attempt + 1);
+          }, 1000);
+          return;
+        }
+        
+        // Handle other errors or max retries reached
         let errorMessage = '';
         switch(event.error) {
           case 'network':
-            errorMessage = 'Network error occurred. Check your internet connection and try again. Make sure you\'re not using a VPN or proxy that might block speech services.';
+            errorMessage = 'Network connection failed after multiple attempts. Please check your internet connection and try again.';
+            setLastError('Network connection issues');
             break;
           case 'not-allowed':
             errorMessage = 'Microphone access denied. Please allow microphone permissions and refresh the page.';
+            setLastError('Microphone access denied');
             break;
           case 'no-speech':
             errorMessage = 'No speech detected. Please speak clearly and try again.';
+            setLastError('No speech detected');
             break;
           case 'audio-capture':
-            errorMessage = 'No microphone detected. Please connect a microphone and refresh the page.';
+            errorMessage = 'No microphone detected. Please connect a microphone.';
+            setLastError('No microphone available');
             break;
           case 'service-not-allowed':
-            errorMessage = 'Speech service blocked. Ensure you\'re using HTTPS and try refreshing the page.';
-            break;
-          case 'bad-grammar':
-            errorMessage = 'Speech recognition service error. Please try again.';
-            break;
-          case 'language-not-supported':
-            errorMessage = 'Language not supported by speech recognition service.';
+            errorMessage = 'Speech service blocked. Please use HTTPS and refresh the page.';
+            setLastError('Speech service blocked');
             break;
           case 'aborted':
             // Don't show error for user-initiated stops
+            setRetryCount(0);
             return;
           default:
-            errorMessage = `Speech recognition failed (${event.error}). Please try again or check your internet connection.`;
+            errorMessage = `Speech recognition failed: ${event.error}. Please try again.`;
+            setLastError(`Speech error: ${event.error}`);
         }
         
         if (errorMessage) {
           alert(errorMessage);
         }
+        setRetryCount(0);
       };
 
       recognitionRef.current.onend = () => {
@@ -200,20 +226,14 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
         setIsListening(false);
       };
 
-      // Start recognition with error handling
-      try {
-        recognitionRef.current.start();
-      } catch (error) {
-        clearTimeout(timeout);
-        console.error('Failed to start speech recognition:', error);
-        setIsListening(false);
-        alert('Failed to start speech recognition. Please try again.');
-      }
+      // Start recognition
+      recognitionRef.current.start();
 
     } catch (error) {
       console.error('Speech recognition setup error:', error);
       setIsListening(false);
-      alert('Unable to initialize speech recognition. Please check your browser settings.');
+      setRetryCount(0);
+      alert('Unable to initialize speech recognition. Please try again.');
     }
   };
 
@@ -221,7 +241,11 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
   useEffect(() => {
     return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
       }
     };
   }, []);
@@ -325,9 +349,9 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             color={isListening ? "secondary" : "primary"}
             onClick={() => handleVoiceInput('ingredient')}
             disabled={!speechSupported}
-            title={speechSupported ? "Click to use voice input" : "Speech recognition not available"}
+            title={speechSupported ? "Click to use voice input" : lastError}
           >
-            {isListening ? '⏹️' : '🎤'}
+            {isListening ? (retryCount > 0 ? `⏳${retryCount + 1}` : '⏹️') : '🎤'}
           </Button>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
@@ -363,9 +387,9 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             color={isListening ? "secondary" : "primary"}
             onClick={() => handleVoiceInput('tag')}
             disabled={!speechSupported}
-            title={speechSupported ? "Click to use voice input" : "Speech recognition not available"}
+            title={speechSupported ? "Click to use voice input" : lastError}
           >
-            {isListening ? '⏹️' : '🎤'}
+            {isListening ? (retryCount > 0 ? `⏳${retryCount + 1}` : '⏹️') : '🎤'}
           </Button>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
@@ -401,10 +425,26 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
           </Typography>
         )}
 
-        {!speechSupported && (
-          <Typography variant="body2" color="warning" sx={{ mt: 1 }}>
-            Speech recognition not available. Please ensure you're using HTTPS (or localhost), have microphone permissions, and a stable internet connection.
-          </Typography>
+        {!speechSupported && lastError && (
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            Speech recognition unavailable: {lastError}
+            {lastError.includes('HTTPS') && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Try accessing this page via HTTPS or use localhost for testing.
+              </Typography>
+            )}
+            {lastError.includes('Microphone') && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Please allow microphone permissions and refresh the page.
+              </Typography>
+            )}
+          </Alert>
+        )}
+
+        {retryCount > 0 && (
+          <Alert severity="info" sx={{ mt: 1 }}>
+            Retrying speech recognition... (Attempt {retryCount + 1}/3)
+          </Alert>
         )}
       </DialogContent>
 
