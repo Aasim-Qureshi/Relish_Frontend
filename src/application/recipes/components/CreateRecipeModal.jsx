@@ -129,7 +129,6 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
           if (event.results && event.results[0] && event.results[0][0]) {
             const transcript = event.results[0][0].transcript.trim();
             console.log('Speech result:', transcript);
-
             if (transcript) {
               if (type === 'ingredient') {
                 const ingredients = transcript
@@ -151,9 +150,21 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
                   ...v,
                   tags: [...v.tags, ...tags]
                 }));
+              } else if (type === 'title') {
+                setValues(v => ({
+                  ...v,
+                  title: transcript
+                }));
+              } else if (type === 'instructions') {
+                setValues(v => ({
+                  ...v,
+                  instructions: v.instructions
+                    ? v.instructions.trim() + ' ' + transcript
+                    : transcript
+                }));
               }
-              setLastError(''); // Clear any previous errors
             }
+
           }
         } catch (error) {
           console.error('Error processing speech result:', error);
