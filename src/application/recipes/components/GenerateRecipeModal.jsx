@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, Chip, Stack
@@ -8,7 +8,6 @@ export default function GenerateRecipeModal({ open, onClose, onSubmit, loading }
   const [ingredients, setIngredients] = useState([]);
   const [inputValue, setInputValue] = useState('');
 
-  // Voice Recognition Setup
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const recognition = SpeechRecognition ? new SpeechRecognition() : null;
   if (recognition) {
@@ -27,7 +26,7 @@ export default function GenerateRecipeModal({ open, onClose, onSubmit, loading }
 
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript.trim();
-      const words = transcript.split(/\s+/); // Add each spoken word as ingredient
+      const words = transcript.split(/\s+/); 
       setIngredients(prev => [...prev, ...words]);
     };
 

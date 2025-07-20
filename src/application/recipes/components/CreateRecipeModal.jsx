@@ -23,21 +23,19 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
   const [ingredientInput, setIngredientInput] = useState('');
   const [imageError, setImageError] = useState('');
 
-  // Initialize speech recognition
   useEffect(() => {
     const checkSpeechSupport = async () => {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      
+
       if (!SpeechRecognition) {
         setSpeechSupported(false);
         return;
       }
 
-      // Check if we're on HTTPS or localhost
-      const isSecure = window.location.protocol === 'https:' || 
-                      window.location.hostname === 'localhost' ||
-                      window.location.hostname === '127.0.0.1';
-      
+      const isSecure = window.location.protocol === 'https:' ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1';
+
       if (!isSecure) {
         setSpeechSupported(false);
         setLastError('HTTPS required for speech recognition');
@@ -45,7 +43,6 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       }
 
       try {
-        // Test microphone permissions
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach(track => track.stop());
@@ -70,7 +67,6 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       return;
     }
 
-    // If currently listening, stop
     if (isListening) {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
@@ -79,7 +75,6 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       return;
     }
 
-    // Check network connectivity
     if (!navigator.onLine) {
       alert('No internet connection. Speech recognition requires internet access.');
       return;
@@ -90,29 +85,25 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
 
   const startSpeechRecognition = async (type, attempt = 0) => {
     const MAX_RETRIES = 2;
-    
+
     try {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      
-      // Clean up any existing recognition
+
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
         } catch (e) {
-          // Ignore cleanup errors
         }
         recognitionRef.current = null;
       }
 
       recognitionRef.current = new SpeechRecognition();
-      
-      // Configure recognition with more reliable settings
+
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
       recognitionRef.current.lang = 'en-US';
       recognitionRef.current.maxAlternatives = 1;
-      
-      // Shorter timeout to fail faster and retry
+
       const timeout = setTimeout(() => {
         if (recognitionRef.current && isListening) {
           recognitionRef.current.stop();
@@ -133,27 +124,27 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
           if (event.results && event.results[0] && event.results[0][0]) {
             const transcript = event.results[0][0].transcript.trim();
             console.log('Speech result:', transcript);
-            
+
             if (transcript) {
               if (type === 'ingredient') {
                 const ingredients = transcript
                   .split(/[,;]/)
                   .map(item => item.trim())
                   .filter(item => item.length > 0);
-                
-                setValues(v => ({ 
-                  ...v, 
-                  ingredients: [...v.ingredients, ...ingredients] 
+
+                setValues(v => ({
+                  ...v,
+                  ingredients: [...v.ingredients, ...ingredients]
                 }));
               } else if (type === 'tag') {
                 const tags = transcript
                   .split(/[,;]/)
                   .map(item => item.trim())
                   .filter(item => item.length > 0);
-                
-                setValues(v => ({ 
-                  ...v, 
-                  tags: [...v.tags, ...tags] 
+
+                setValues(v => ({
+                  ...v,
+                  tags: [...v.tags, ...tags]
                 }));
               }
               setLastError(''); // Clear any previous errors
@@ -170,21 +161,19 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
         clearTimeout(timeout);
         console.error('Speech recognition error:', event.error, 'attempt:', attempt + 1);
         setIsListening(false);
-        
-        // Handle network errors with retry logic
+
         if (event.error === 'network' && attempt < MAX_RETRIES) {
           console.log('Network error, retrying in 1 second...');
           setLastError(`Network error, retrying... (${attempt + 1}/${MAX_RETRIES + 1})`);
-          
+
           setTimeout(() => {
             startSpeechRecognition(type, attempt + 1);
           }, 1000);
           return;
         }
-        
-        // Handle other errors or max retries reached
+
         let errorMessage = '';
-        switch(event.error) {
+        switch (event.error) {
           case 'network':
             errorMessage = 'Network connection failed after multiple attempts. Please check your internet connection and try again.';
             setLastError('Network connection issues');
@@ -206,14 +195,13 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             setLastError('Speech service blocked');
             break;
           case 'aborted':
-            // Don't show error for user-initiated stops
             setRetryCount(0);
             return;
           default:
             errorMessage = `Speech recognition failed: ${event.error}. Please try again.`;
             setLastError(`Speech error: ${event.error}`);
         }
-        
+
         if (errorMessage) {
           alert(errorMessage);
         }
@@ -226,7 +214,6 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
         setIsListening(false);
       };
 
-      // Start recognition
       recognitionRef.current.start();
 
     } catch (error) {
@@ -327,15 +314,28 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>Create Recipe</DialogTitle>
       <DialogContent>
-        <TextField
-          label="Title"
-          name="title"
-          fullWidth
-          margin="normal"
-          value={values.title}
-          onChange={handleChange}
-        />
+        {/* Title Field with Voice */}
+        <Stack direction="row" spacing={1} alignItems="center">
+          <TextField
+            label="Title"
+            name="title"
+            fullWidth
+            margin="normal"
+            value={values.title}
+            onChange={handleChange}
+          />
+          <Button
+            variant={isListening && voiceTargetField === 'title' ? "contained" : "outlined"}
+            color={isListening && voiceTargetField === 'title' ? "secondary" : "primary"}
+            onClick={() => handleVoiceInput('title')}
+            disabled={!speechSupported}
+            title="Voice input for title"
+          >
+            {isListening && voiceTargetField === 'title' ? '⏹️' : '🎤'}
+          </Button>
+        </Stack>
 
+        {/* Ingredient Input with Voice */}
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
           <TextField
             label="Add ingredient (press Enter)"
@@ -344,36 +344,46 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             onChange={(e) => setIngredientInput(e.target.value)}
             onKeyDown={handleAddIngredient}
           />
-          <Button 
-            variant={isListening ? "contained" : "outlined"}
-            color={isListening ? "secondary" : "primary"}
+          <Button
+            variant={isListening && voiceTargetField === 'ingredient' ? "contained" : "outlined"}
+            color={isListening && voiceTargetField === 'ingredient' ? "secondary" : "primary"}
             onClick={() => handleVoiceInput('ingredient')}
             disabled={!speechSupported}
-            title={speechSupported ? "Click to use voice input" : lastError}
+            title="Voice input for ingredient"
           >
-            {isListening ? (retryCount > 0 ? `⏳${retryCount + 1}` : '⏹️') : '🎤'}
+            {isListening && voiceTargetField === 'ingredient' ? '⏹️' : '🎤'}
           </Button>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
           {values.ingredients.map((ing, i) => (
-            <Chip
-              key={i}
-              label={ing}
-              onDelete={() => handleDeleteIngredient(i)}
-            />
+            <Chip key={i} label={ing} onDelete={() => handleDeleteIngredient(i)} />
           ))}
         </Stack>
 
-        <TextField
-          label="Instructions"
-          name="instructions"
-          fullWidth
-          margin="normal"
-          multiline
-          value={values.instructions}
-          onChange={handleChange}
-        />
+        {/* Instructions Field with Voice */}
+        <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ mt: 2 }}>
+          <TextField
+            label="Instructions"
+            name="instructions"
+            fullWidth
+            margin="normal"
+            multiline
+            value={values.instructions}
+            onChange={handleChange}
+          />
+          <Button
+            variant={isListening && voiceTargetField === 'instructions' ? "contained" : "outlined"}
+            color={isListening && voiceTargetField === 'instructions' ? "secondary" : "primary"}
+            onClick={() => handleVoiceInput('instructions')}
+            disabled={!speechSupported}
+            title="Voice input for instructions"
+            sx={{ mt: 2 }}
+          >
+            {isListening && voiceTargetField === 'instructions' ? '⏹️' : '🎤'}
+          </Button>
+        </Stack>
 
+        {/* Tag Input with Voice */}
         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
           <TextField
             label="Add tag (press Enter)"
@@ -382,26 +392,23 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={handleAddTag}
           />
-          <Button 
-            variant={isListening ? "contained" : "outlined"}
-            color={isListening ? "secondary" : "primary"}
+          <Button
+            variant={isListening && voiceTargetField === 'tag' ? "contained" : "outlined"}
+            color={isListening && voiceTargetField === 'tag' ? "secondary" : "primary"}
             onClick={() => handleVoiceInput('tag')}
             disabled={!speechSupported}
-            title={speechSupported ? "Click to use voice input" : lastError}
+            title="Voice input for tag"
           >
-            {isListening ? (retryCount > 0 ? `⏳${retryCount + 1}` : '⏹️') : '🎤'}
+            {isListening && voiceTargetField === 'tag' ? '⏹️' : '🎤'}
           </Button>
         </Stack>
         <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
           {values.tags.map((tag, i) => (
-            <Chip
-              key={i}
-              label={tag}
-              onDelete={() => handleDeleteTag(i)}
-            />
+            <Chip key={i} label={tag} onDelete={() => handleDeleteTag(i)} />
           ))}
         </Stack>
 
+        {/* Image Upload */}
         <Button variant="outlined" component="label" sx={{ mt: 2 }}>
           Upload Image
           <input
@@ -412,19 +419,18 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             onChange={handleFileChange}
           />
         </Button>
-
         {values.imageFile && !imageError && (
           <Typography variant="body2" sx={{ mt: 1 }}>
             Selected: {values.imageFile.name}
           </Typography>
         )}
-
         {imageError && (
           <Typography variant="body2" color="error" sx={{ mt: 1 }}>
             {imageError}
           </Typography>
         )}
 
+        {/* Speech Errors and Retry Info */}
         {!speechSupported && lastError && (
           <Alert severity="warning" sx={{ mt: 2 }}>
             Speech recognition unavailable: {lastError}
@@ -440,7 +446,6 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
             )}
           </Alert>
         )}
-
         {retryCount > 0 && (
           <Alert severity="info" sx={{ mt: 1 }}>
             Retrying speech recognition... (Attempt {retryCount + 1}/3)

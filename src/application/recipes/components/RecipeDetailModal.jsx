@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Typography, Chip, Box, Button, CardMedia
@@ -7,6 +6,8 @@ import ReactMarkdown from 'react-markdown';
 
 export default function RecipeDetailModal({ open, onClose, recipe }) {
   if (!recipe) return null;
+
+  console.log('RecipeDetailModal', recipe);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
