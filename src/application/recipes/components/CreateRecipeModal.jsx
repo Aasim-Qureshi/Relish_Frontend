@@ -10,6 +10,8 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
   const [speechSupported, setSpeechSupported] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [lastError, setLastError] = useState('');
+  const [voiceTargetField, setVoiceTargetField] = useState(null);
+
 
   const [values, setValues] = useState({
     title: '',
@@ -72,6 +74,7 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
         recognitionRef.current.stop();
       }
       setIsListening(false);
+      setVoiceTargetField(null);
       return;
     }
 
@@ -80,8 +83,10 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
       return;
     }
 
+    setVoiceTargetField(type);
     await startSpeechRecognition(type);
   };
+
 
   const startSpeechRecognition = async (type, attempt = 0) => {
     const MAX_RETRIES = 2;
@@ -212,7 +217,9 @@ export default function CreateRecipeModal({ open, onClose, onSubmit, loading }) 
         clearTimeout(timeout);
         console.log('Speech recognition ended');
         setIsListening(false);
+        setVoiceTargetField(null);
       };
+
 
       recognitionRef.current.start();
 
